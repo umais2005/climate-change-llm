@@ -85,8 +85,7 @@ for idx, message in enumerate(st.session_state.conversation_history):
         st.markdown(title, unsafe_allow_html=True)
         st.markdown(f'{style}{message_html}', unsafe_allow_html=True)
         if role == "assistant":
-            if st.button(f"Copy", key=f"copy_button_{idx}"):
-               st_copy_to_clipboard(message["content"])
+           st_copy_to_clipboard(message["content"])
 
 # Use a text_area for user input and store its value in 'submitted_input'
 user_input = st.text_area(
