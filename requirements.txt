@@ -16,5 +16,5 @@ pyttsx3
 docx2txt
 langchain_pinecone
 langchain_huggingface
-pyperclip
+st_copy_to_clipboard
 streamlit_javascript
