@@ -21,7 +21,7 @@ if 'submitted_input' not in st.session_state:
     st.session_state.submitted_input = ""
 
 if st.button("Ingest/Check for new docs in your drive data folder"):
-    processor = DocumentProcessor(drive_folder_id="1ptf4zFnw0Lu5sJMMDIqwY2WxDVj29kz1")
+    processor = DocumentProcessor()
     processor.process_and_add_documents_from_drive()
     
 # Function to invoke the conversational chain and update the chat history
