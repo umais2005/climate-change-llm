@@ -4,7 +4,6 @@ INDEX_NAME = "test"
 import io
 import json
 import os
-from py import process
 import streamlit as st
 from langchain_community.document_loaders import PyMuPDFLoader, Docx2txtLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
