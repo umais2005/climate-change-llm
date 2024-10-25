@@ -39,7 +39,7 @@ class DocumentProcessor:
         print("Document Processor initialized.")
 
     def load_pinecone_vector_store(self):
-        pinecone_api_key = os.getenv("UMAIS_PINECONE_API_KEY")
+        pinecone_api_key = os.getenv("PINECONE_API_KEY")
         if not pinecone_api_key:
             raise ValueError("No Pinecone API key found in environment variables.")
         
