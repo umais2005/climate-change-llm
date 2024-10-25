@@ -16,5 +16,10 @@ pyttsx3
 docx2txt
 langchain_pinecone
 langchain_huggingface
-st_copy_to_clipboard
+pyperclip
 streamlit_javascript
+st-copy-to-clipboard
+google-auth
+google-auth-oauthlib
+google-auth-httplib2
+google-api-python-client
