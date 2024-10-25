@@ -1,11 +1,12 @@
 import streamlit as st
 from chain_setup import conversational_rag_chain
-import markdown2
-import pyperclip
 from st_copy_to_clipboard import st_copy_to_clipboard
-
+from data_ingestion import DocumentProcessor
 # Title for the app
 st.title("AI Assistant")
+
+# if 'ingested' not in st.session_state:
+#     st.session_state.ingested = False
 
 # Initialize session state for storing chat history if not already initialized
 if 'conversation_history' not in st.session_state:
@@ -19,6 +20,10 @@ if 'sources' not in st.session_state:
 if 'submitted_input' not in st.session_state:
     st.session_state.submitted_input = ""
 
+if st.button("Ingest/Check for new docs in your drive data folder"):
+    processor = DocumentProcessor(drive_folder_id="1ptf4zFnw0Lu5sJMMDIqwY2WxDVj29kz1")
+    processor.process_and_add_documents_from_drive()
+    
 # Function to invoke the conversational chain and update the chat history
 def process_message():
     user_input = st.session_state.get('submitted_input', '')  # Get the submitted input
@@ -85,7 +90,7 @@ for idx, message in enumerate(st.session_state.conversation_history):
         st.markdown(title, unsafe_allow_html=True)
         st.markdown(f'{style}{message_html}', unsafe_allow_html=True)
         if role == "assistant":
-           st_copy_to_clipboard(message["content"])
+            st_copy_to_clipboard(message["content"])
 
 # Use a text_area for user input and store its value in 'submitted_input'
 user_input = st.text_area(
