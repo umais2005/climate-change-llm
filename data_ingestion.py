@@ -374,7 +374,7 @@ class DocumentProcessor:
         Splits the transcript into smaller chunks, converts each to a Document,
         and adds them to the Pinecone index.
         """
-        self.index.upsert([('id2', [1.0] * self.dimensions)])
+        self.index.upsert([(podcast_id, [1.0] * self.dimensions)])
 
         text_splitter = RecursiveCharacterTextSplitter(chunk_size=700, chunk_overlap=200)
         chunks = text_splitter.split_text(transcript)
