@@ -9,6 +9,7 @@ langchain-groq
 faiss-cpu
 openai
 sqlalchemy
+moviepy
 python-dotenv
 pinecone-client
 PyMuPDF
