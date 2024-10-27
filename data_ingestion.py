@@ -403,7 +403,7 @@ class DocumentProcessor:
         print(podcast_ids[:2])
         print("Checking existence of documents")
         existing_ids = self.check_existing_docs_by_id(podcast_ids)
-        print(existing_ids[:latest_n])
+        print(list(existing_ids)[:latest_n])
         print("Processing podcasts texts")
         new_podcasts = [podcast for podcast in podcasts if podcast['title'] not in existing_ids][:latest_n]
         if new_podcasts:
