@@ -17,7 +17,7 @@ from googleapiclient.http import MediaIoBaseDownload
 from google.oauth2 import service_account
 from warnings import filterwarnings
 from moviepy.editor import AudioFileClip
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor, as_completed
 from pydub import AudioSegment
 import unicodedata
 from openai import OpenAI
@@ -328,57 +328,58 @@ class DocumentProcessor:
 
     def split_audio_with_moviepy(self, input_path, output_dir, chunk_duration=1200):
         """
-        Splits the audio file into chunks using moviepy, with parallel processing.
+        Splits the audio file into chunks using moviepy.
         """
         os.makedirs(output_dir, exist_ok=True)
         audio_clip = AudioFileClip(input_path)
         total_duration = audio_clip.duration
-        
-        def save_chunk(start_time, end_time, chunk_index):
-            chunk = audio_clip.subclip(start_time, end_time)
-            chunk_path = os.path.join(output_dir, f"chunk_{chunk_index:03d}.mp3")
-            chunk.write_audiofile(chunk_path, codec='mp3')
-        
-        # Split audio into chunks and save each in parallel
-        with ThreadPoolExecutor() as executor:
-            futures = []
-            for i in range(0, int(total_duration), chunk_duration):
-                start_time = i
-                end_time = min(i + chunk_duration, total_duration)
-                chunk_index = i // chunk_duration
-                futures.append(executor.submit(save_chunk, start_time, end_time, chunk_index))
 
-            # Wait for all chunks to finish processing
-            for future in futures:
-                future.result()
+        # Split audio into chunks and save each as a separate file
+        for i in range(0, int(total_duration), chunk_duration):
+            start_time = i
+            end_time = min(i + chunk_duration, total_duration)
+            chunk = audio_clip.subclip(start_time, end_time)
+            chunk_path = os.path.join(output_dir, f"chunk_{i//chunk_duration:03d}.mp3")
+            chunk.write_audiofile(chunk_path, codec='mp3')
+
+    def transcribe_chunk(self, chunk_path):
+        """
+        Transcribes a single audio chunk using OpenAI Whisper API.
+        """
+        with open(chunk_path, "rb") as audio_file:
+            transcription = self.client.audio.transcriptions.create(
+                file=audio_file,
+                model="whisper-1",
+                response_format="verbose_json",
+                timestamp_granularities=["segment"]
+            )
+        os.remove(chunk_path)  # Clean up chunk file after transcription
+        return transcription.text  # Collect only text
 
     def process_podcast_audio(self, audio_url, chunk_duration=1200):
         """
         Downloads, segments, and transcribes an audio file using OpenAI Whisper API.
         """
-        
         output_dir = os.path.join(TEMP_DOWNLOAD_DIR, "chunks")
         self.split_audio_with_moviepy(audio_url, output_dir, chunk_duration=chunk_duration)
-        # self.split_audio_with_pydub(audio_url, output_dir, chunk_duration=chunk_duration)
 
         transcripts = []
-        st.success("Using whisper")
-        for chunk_filename in sorted(os.listdir(output_dir)):
-            chunk_path = os.path.join(output_dir, chunk_filename)
-            with open(chunk_path, "rb") as audio_file:
-                transcription = self.client.audio.transcriptions.create(
-                    file=audio_file,
-                    model="whisper-1",
-                    response_format="verbose_json",
-                    timestamp_granularities=["segment"]
-                )
-                
-            transcripts.append(transcription.text)  # Collect text only
+
+        # Use ProcessPoolExecutor to transcribe each chunk in parallel
+        with ThreadPoolExecutor() as executor:
+            # Submit all transcriptions tasks to the pool
+            futures = {
+                executor.submit(self.transcribe_chunk, os.path.join(output_dir, chunk_filename)): chunk_filename
+                for chunk_filename in sorted(os.listdir(output_dir))
+            }
             
-            os.remove(chunk_path)  # Clean up chunk file
-        
-        os.rmdir(output_dir)  # Remove the chunks directory
+            # Collect results as they complete
+            for future in as_completed(futures):
+                transcripts.append(future.result())
+
+        os.rmdir(output_dir)  # Remove the chunks directory after all transcriptions are done
         return " ".join(transcripts)
+
 
     def add_podcast_to_index(self, podcast_id, transcript):
         """
