@@ -328,29 +328,19 @@ class DocumentProcessor:
 
     def split_audio_with_moviepy(self, input_path, output_dir, chunk_duration=1200):
         """
-        Splits the audio file into chunks using moviepy, with parallel processing.
+        Splits the audio file into chunks using moviepy.
         """
         os.makedirs(output_dir, exist_ok=True)
         audio_clip = AudioFileClip(input_path)
         total_duration = audio_clip.duration
 
-        def save_chunk(start_time, end_time, chunk_index):
+        # Split audio into chunks and save each as a separate file
+        for i in range(0, int(total_duration), chunk_duration):
+            start_time = i
+            end_time = min(i + chunk_duration, total_duration)
             chunk = audio_clip.subclip(start_time, end_time)
-            chunk_path = os.path.join(output_dir, f"chunk_{chunk_index:03d}.mp3")
+            chunk_path = os.path.join(output_dir, f"chunk_{i//chunk_duration:03d}.mp3")
             chunk.write_audiofile(chunk_path, codec='mp3')
-
-        # Split audio into chunks and save each in parallel
-        with ThreadPoolExecutor() as executor:
-            futures = []
-            for i in range(0, int(total_duration), chunk_duration):
-                start_time = i
-                end_time = min(i + chunk_duration, total_duration)
-                chunk_index = i // chunk_duration
-                futures.append(executor.submit(save_chunk, start_time, end_time, chunk_index))
-
-            # Wait for all chunks to finish processing
-            for future in futures:
-                future.result()
 
     def process_podcast_audio(self, audio_url, chunk_duration=1200):
         """
@@ -400,14 +390,13 @@ class DocumentProcessor:
         podcasts = self.get_podcasts()
 
         podcast_ids = [podcast["title"] for podcast in podcasts]
-        print(podcast_ids[:2])
-        print("Checking existence of documents")
+        st.success("Checking dupes for podcasts")
         existing_ids = self.check_existing_docs_by_id(podcast_ids)
-        print(list(existing_ids)[:latest_n])
-        print("Processing podcasts texts")
         new_podcasts = [podcast for podcast in podcasts if podcast['title'] not in existing_ids][:latest_n]
+        print(new_podcasts)
         if new_podcasts:
             st.success("New podcasts found.")
+            print("Processing podcasts texts")
             for podcast in new_podcasts:
                 podcast_id = podcast["title"]
                 print(podcast_id)
