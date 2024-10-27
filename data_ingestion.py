@@ -352,7 +352,7 @@ class DocumentProcessor:
         self.split_audio_with_pydub(audio_url, output_dir, chunk_duration=chunk_duration)
 
         transcripts = []
-        
+        st.success("Using whisper")
         for chunk_filename in sorted(os.listdir(output_dir)):
             chunk_path = os.path.join(output_dir, chunk_filename)
             with open(chunk_path, "rb") as audio_file:
