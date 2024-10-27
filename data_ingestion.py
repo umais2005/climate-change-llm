@@ -348,7 +348,8 @@ class DocumentProcessor:
         """
         
         output_dir = os.path.join(TEMP_DOWNLOAD_DIR, "chunks")
-        self.split_audio_with_moviepy(audio_url, output_dir, chunk_duration=chunk_duration)
+        # self.split_audio_with_moviepy(audio_url, output_dir, chunk_duration=chunk_duration)
+        self.split_audio_with_pydub(audio_url, output_dir, chunk_duration=chunk_duration)
 
         transcripts = []
         
