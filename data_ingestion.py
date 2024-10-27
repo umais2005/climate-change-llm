@@ -17,6 +17,8 @@ from googleapiclient.http import MediaIoBaseDownload
 from google.oauth2 import service_account
 from warnings import filterwarnings
 from moviepy.editor import AudioFileClip
+from concurrent.futures import ThreadPoolExecutor
+from pydub import AudioSegment
 import unicodedata
 from openai import OpenAI
 filterwarnings("ignore")
@@ -37,6 +39,7 @@ class DocumentProcessor:
         load_dotenv()
         self.rss_url = rss_url
         self.drive_folder_id = drive_folder_id
+        self.dimensions = 1536
         self.directory = directory_path
         self.index_name = index_name
         openai_api_key = os.getenv("OPENAI_API_KEY")
@@ -296,22 +299,58 @@ class DocumentProcessor:
 
         return new_podcasts
 
+    def split_audio_with_pydub(input_path, output_dir, chunk_duration=1200):
+        """
+        Splits the audio file into chunks using pydub, with parallel processing.
+        """
+        os.makedirs(output_dir, exist_ok=True)
+        audio = AudioSegment.from_file(input_path)
+        total_duration = len(audio)  # Duration in milliseconds
+
+        def save_chunk(start_time, end_time, chunk_index):
+            chunk = audio[start_time:end_time]
+            chunk_path = os.path.join(output_dir, f"chunk_{chunk_index:03d}.mp3")
+            chunk.export(chunk_path, format="mp3")
+
+        # Split audio into chunks and save each in parallel
+        with ThreadPoolExecutor() as executor:
+            futures = []
+            for i in range(0, total_duration, chunk_duration * 1000):  # chunk_duration is in seconds, convert to ms
+                start_time = i
+                end_time = min(i + chunk_duration * 1000, total_duration)
+                chunk_index = i // (chunk_duration * 1000)
+                futures.append(executor.submit(save_chunk, start_time, end_time, chunk_index))
+
+            # Wait for all chunks to finish processing
+            for future in futures:
+                future.result()
+
 
     def split_audio_with_moviepy(self, input_path, output_dir, chunk_duration=1200):
         """
-        Splits the audio file into chunks using moviepy.
+        Splits the audio file into chunks using moviepy, with parallel processing.
         """
         os.makedirs(output_dir, exist_ok=True)
         audio_clip = AudioFileClip(input_path)
         total_duration = audio_clip.duration
 
-        # Split audio into chunks and save each as a separate file
-        for i in range(0, int(total_duration), chunk_duration):
-            start_time = i
-            end_time = min(i + chunk_duration, total_duration)
+        def save_chunk(start_time, end_time, chunk_index):
             chunk = audio_clip.subclip(start_time, end_time)
-            chunk_path = os.path.join(output_dir, f"chunk_{i//chunk_duration:03d}.mp3")
+            chunk_path = os.path.join(output_dir, f"chunk_{chunk_index:03d}.mp3")
             chunk.write_audiofile(chunk_path, codec='mp3')
+
+        # Split audio into chunks and save each in parallel
+        with ThreadPoolExecutor() as executor:
+            futures = []
+            for i in range(0, int(total_duration), chunk_duration):
+                start_time = i
+                end_time = min(i + chunk_duration, total_duration)
+                chunk_index = i // chunk_duration
+                futures.append(executor.submit(save_chunk, start_time, end_time, chunk_index))
+
+            # Wait for all chunks to finish processing
+            for future in futures:
+                future.result()
 
     def process_podcast_audio(self, audio_url, chunk_duration=1200):
         """
@@ -345,13 +384,14 @@ class DocumentProcessor:
         Splits the transcript into smaller chunks, converts each to a Document,
         and adds them to the Pinecone index.
         """
+        self.index.upsert([('id2', [1.0] * self.dimensions)])
+
         text_splitter = RecursiveCharacterTextSplitter(chunk_size=700, chunk_overlap=200)
         chunks = text_splitter.split_text(transcript)
-
         documents = [Document(page_content=chunk, metadata={"source": podcast_id}) for chunk in chunks]
         self.vector_store.add_documents(documents=documents, ids=[f"{podcast_id}_chunk_{i}" for i in range(len(documents))])
 
-    def process_and_add_new_podcasts(self):
+    def process_and_add_new_podcasts(self, latest_n=-1):
         """
         Main method to retrieve, process, and add new podcasts from RSS feed.
         """
@@ -363,8 +403,9 @@ class DocumentProcessor:
         print(podcast_ids[:2])
         print("Checking existence of documents")
         existing_ids = self.check_existing_docs_by_id(podcast_ids)
+        print(existing_ids[:latest_n])
         print("Processing podcasts texts")
-        new_podcasts = [podcast for podcast in podcasts if podcast['title'] not in existing_ids]
+        new_podcasts = [podcast for podcast in podcasts if podcast['title'] not in existing_ids][:latest_n]
         if new_podcasts:
             st.success("New podcasts found.")
             for podcast in new_podcasts:
@@ -373,7 +414,6 @@ class DocumentProcessor:
                 transcript = self.process_podcast_audio(podcast["mp3_url"])
                 self.add_podcast_to_index(podcast_id, transcript)
                 st.success(f"Podcast '{podcast_id}' processed and added to Pinecone.")
-                break
         else:
             st.success("No new podcasts to be ingested")
     
@@ -383,7 +423,7 @@ if __name__ == "__main__": ## TESTING ##
     processor = DocumentProcessor(INDEX_NAME)
     # processor.process_and_add_documents_from_drive()
     # processor.process_and_add_documents_from_local()
-    processor.process_and_add_new_podcasts()
+    text = processor.process_podcast_audio("https://chrt.fm/track/DBDAF8/cdn.simplecast.com/audio/a40ab607-6c05-44d6-b237-5cd4abd47ac6/episodes/5b62ad45-1287-402e-b50a-0dcf220a1760/audio/2adb5029-5fb7-4afe-bec3-4a5f48358581/default_tc.mp3?aid=rss_feed&feed=XFfCG1w8")
     # existing_ids = processor.check_existing_docs_by_id(files)
 
     # processor.process_and_add_documents_from_local()
