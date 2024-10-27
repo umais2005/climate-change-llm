@@ -328,19 +328,29 @@ class DocumentProcessor:
 
     def split_audio_with_moviepy(self, input_path, output_dir, chunk_duration=1200):
         """
-        Splits the audio file into chunks using moviepy.
+        Splits the audio file into chunks using moviepy, with parallel processing.
         """
         os.makedirs(output_dir, exist_ok=True)
         audio_clip = AudioFileClip(input_path)
         total_duration = audio_clip.duration
-
-        # Split audio into chunks and save each as a separate file
-        for i in range(0, int(total_duration), chunk_duration):
-            start_time = i
-            end_time = min(i + chunk_duration, total_duration)
+        
+        def save_chunk(start_time, end_time, chunk_index):
             chunk = audio_clip.subclip(start_time, end_time)
-            chunk_path = os.path.join(output_dir, f"chunk_{i//chunk_duration:03d}.mp3")
+            chunk_path = os.path.join(output_dir, f"chunk_{chunk_index:03d}.mp3")
             chunk.write_audiofile(chunk_path, codec='mp3')
+        
+        # Split audio into chunks and save each in parallel
+        with ThreadPoolExecutor() as executor:
+            futures = []
+            for i in range(0, int(total_duration), chunk_duration):
+                start_time = i
+                end_time = min(i + chunk_duration, total_duration)
+                chunk_index = i // chunk_duration
+                futures.append(executor.submit(save_chunk, start_time, end_time, chunk_index))
+
+            # Wait for all chunks to finish processing
+            for future in futures:
+                future.result()
 
     def process_podcast_audio(self, audio_url, chunk_duration=1200):
         """
@@ -348,8 +358,8 @@ class DocumentProcessor:
         """
         
         output_dir = os.path.join(TEMP_DOWNLOAD_DIR, "chunks")
-        # self.split_audio_with_moviepy(audio_url, output_dir, chunk_duration=chunk_duration)
-        self.split_audio_with_pydub(audio_url, output_dir, chunk_duration=chunk_duration)
+        self.split_audio_with_moviepy(audio_url, output_dir, chunk_duration=chunk_duration)
+        # self.split_audio_with_pydub(audio_url, output_dir, chunk_duration=chunk_duration)
 
         transcripts = []
         st.success("Using whisper")
