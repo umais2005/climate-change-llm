@@ -16,10 +16,12 @@ pyttsx3
 docx2txt
 langchain_pinecone
 langchain_huggingface
-pyperclip
+ffmpeg-python
 streamlit_javascript
 st-copy-to-clipboard
 google-auth
 google-auth-oauthlib
 google-auth-httplib2
 google-api-python-client
+pydub
+ffmpeg
