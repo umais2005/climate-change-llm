@@ -7,6 +7,7 @@ st.title("AI Assistant")
 with st.sidebar:
     index_name = st.text_input("Enter the pincone index name:", value="test").strip()
     folder_id = st.text_input("Enter the folder id found on folder id in gdrive.").strip()
+    latest_n = st.number_input("Latest number of podcasts to be ingested. -1 means all podcasts.", value=10)
 # Initialize session state for storing chat history if not already initialized
 if 'conversation_history' not in st.session_state:
     st.session_state.conversation_history = []
@@ -20,6 +21,7 @@ if 'submitted_input' not in st.session_state:
     st.session_state.submitted_input = ""
 
 with st.sidebar: ingest = st.button("Ingest/Check for new docs in your drive data folder")
+with st.sidebar: podcast = st.button("Ingest podcasts. Might take time.")
 if ingest:
     if folder_id and index_name:
         processor = DocumentProcessor(index_name=index_name,drive_folder_id=folder_id)
@@ -27,6 +29,14 @@ if ingest:
     else:
         with st.sidebar:
             st.error("Enter folder ID and index name")
+if podcast:
+    if latest_n and index_name:
+        pp = DocumentProcessor(index_name=index_name)
+        pp.process_and_add_new_podcasts(latest_n)
+    else:
+        with st.sidebar:
+            st.error("Enter latest number of podcasts and index name")
+
 # Function to invoke the conversational chain and update the chat history
 def process_message():
     user_input = st.session_state.get('submitted_input', '')  # Get the submitted input
