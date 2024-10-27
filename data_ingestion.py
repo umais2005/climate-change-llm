@@ -5,20 +5,22 @@ import io
 import json
 import os
 import streamlit as st
+import feedparser
+from langchain_core.documents import Document
 from langchain_community.document_loaders import PyMuPDFLoader, Docx2txtLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_openai import OpenAIEmbeddings
 from pinecone import Pinecone, ServerlessSpec
+from langchain_pinecone import PineconeVectorStore
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseDownload
 from google.oauth2 import service_account
 from warnings import filterwarnings
+from moviepy.editor import AudioFileClip
+import unicodedata
+from openai import OpenAI
 filterwarnings("ignore")
-# from google.auth.transport.requests import Request
-# from google.oauth2.credentials import Credentials
-# from google_auth_oauthlib.flow import InstalledAppFlow
 import time
-from langchain_pinecone import PineconeVectorStore
 import re
 from dotenv import load_dotenv
 
@@ -28,18 +30,24 @@ TEMP_DOWNLOAD_DIR = './temp_downloads'
 
 
 class DocumentProcessor:
-    def __init__(self, directory_path="./data/", index_name="test",drive_folder_id ="1-50Qfs8g8DELeudumJNarNrS4WRA6-F6"):
+    def __init__(self, directory_path="./data/",
+                index_name="test",
+                drive_folder_id ="1-50Qfs8g8DELeudumJNarNrS4WRA6-F6",
+                rss_url = "https://feeds.simplecast.com/XFfCG1w8"):
         load_dotenv()
+        self.rss_url = rss_url
         self.drive_folder_id = drive_folder_id
         self.directory = directory_path
-        openai_api_key = os.getenv("OPENAI_API_KEY")
-        self.embeddings = OpenAIEmbeddings(api_key=openai_api_key, model="text-embedding-3-small")
         self.index_name = index_name
+        openai_api_key = os.getenv("OPENAI_API_KEY")
+        self.client = OpenAI(api_key=openai_api_key)
+        self.embeddings = OpenAIEmbeddings(api_key=openai_api_key, model="text-embedding-3-small")
         self.vector_store = self.load_pinecone_vector_store()
         print("Document Processor initialized.")
 
     def load_pinecone_vector_store(self):
-        pinecone_api_key = os.getenv("PINECONE_API_KEY")
+        # pinecone_api_key = os.getenv("PINECONE_API_KEY")
+        pinecone_api_key = "bc6855e9-edf3-44ca-9608-ea06f2e9d8b8"
         if not pinecone_api_key:
             raise ValueError("No Pinecone API key found in environment variables.")
         
@@ -203,7 +211,6 @@ class DocumentProcessor:
             os.remove(downloaded_path)
 
 
-
     def process_and_add_documents_from_local(self):
         """
         Process new PDF and DOCX documents from the directory and add them to Pinecone.
@@ -258,12 +265,125 @@ class DocumentProcessor:
             self.vector_store.add_documents(documents=chunks, ids=ids)
             print("Document processing and vector store update complete.")
 
+    def get_podcasts(self):
+        """
+        Fetches podcasts from an RSS feed and extracts MP3 URLs.
+        
+        Parameters:
+        self.rss_url (str): URL of the RSS feed.
+        
+        Returns:
+        list: A list of dictionaries with new podcast details including title, published date, and MP3 URL.
+        """
+        print("Getting RSS Feed")
+        feed = feedparser.parse(self.rss_url)
+        new_podcasts = []
+
+        for entry in feed.entries:
+            mp3_url = next(
+                (enclosure.href for enclosure in entry.get('enclosures', [])
+                if enclosure.type == 'audio/mpeg'), None
+            )
+            title = entry.title.strip()
+            title = unicodedata.normalize('NFKD', title).encode('ascii', 'ignore').decode('ascii')
+            if mp3_url:
+                podcast_info = {
+                    'title': title,
+                    'published': entry.published.strip() if 'published' in entry else entry.updated,
+                    'mp3_url': mp3_url
+                }
+                new_podcasts.append(podcast_info)
+
+        return new_podcasts
+
+
+    def split_audio_with_moviepy(self, input_path, output_dir, chunk_duration=1200):
+        """
+        Splits the audio file into chunks using moviepy.
+        """
+        os.makedirs(output_dir, exist_ok=True)
+        audio_clip = AudioFileClip(input_path)
+        total_duration = audio_clip.duration
+
+        # Split audio into chunks and save each as a separate file
+        for i in range(0, int(total_duration), chunk_duration):
+            start_time = i
+            end_time = min(i + chunk_duration, total_duration)
+            chunk = audio_clip.subclip(start_time, end_time)
+            chunk_path = os.path.join(output_dir, f"chunk_{i//chunk_duration:03d}.mp3")
+            chunk.write_audiofile(chunk_path, codec='mp3')
+
+    def process_podcast_audio(self, audio_url, chunk_duration=1200):
+        """
+        Downloads, segments, and transcribes an audio file using OpenAI Whisper API.
+        """
+        
+        output_dir = os.path.join(TEMP_DOWNLOAD_DIR, "chunks")
+        self.split_audio_with_moviepy(audio_url, output_dir, chunk_duration=chunk_duration)
+
+        transcripts = []
+        
+        for chunk_filename in sorted(os.listdir(output_dir)):
+            chunk_path = os.path.join(output_dir, chunk_filename)
+            with open(chunk_path, "rb") as audio_file:
+                transcription = self.client.audio.transcriptions.create(
+                    file=audio_file,
+                    model="whisper-1",
+                    response_format="verbose_json",
+                    timestamp_granularities=["segment"]
+                )
+                
+            transcripts.append(transcription.text)  # Collect text only
+            
+            os.remove(chunk_path)  # Clean up chunk file
+        
+        os.rmdir(output_dir)  # Remove the chunks directory
+        return " ".join(transcripts)
+
+    def add_podcast_to_index(self, podcast_id, transcript):
+        """
+        Splits the transcript into smaller chunks, converts each to a Document,
+        and adds them to the Pinecone index.
+        """
+        text_splitter = RecursiveCharacterTextSplitter(chunk_size=700, chunk_overlap=200)
+        chunks = text_splitter.split_text(transcript)
+
+        documents = [Document(page_content=chunk, metadata={"source": podcast_id}) for chunk in chunks]
+        self.vector_store.add_documents(documents=documents, ids=[f"{podcast_id}_chunk_{i}" for i in range(len(documents))])
+
+    def process_and_add_new_podcasts(self):
+        """
+        Main method to retrieve, process, and add new podcasts from RSS feed.
+        """
+        print("Fetching podcasts from RSS feed...")
+        st.success("Fetching podcasts from RSS feed...")
+        podcasts = self.get_podcasts()
+
+        podcast_ids = [podcast["title"] for podcast in podcasts]
+        print(podcast_ids[:2])
+        print("Checking existence of documents")
+        existing_ids = self.check_existing_docs_by_id(podcast_ids)
+        print("Processing podcasts texts")
+        new_podcasts = [podcast for podcast in podcasts if podcast['title'] not in existing_ids]
+        if new_podcasts:
+            st.success("New podcasts found.")
+            for podcast in new_podcasts:
+                podcast_id = podcast["title"]
+                print(podcast_id)
+                transcript = self.process_podcast_audio(podcast["mp3_url"])
+                self.add_podcast_to_index(podcast_id, transcript)
+                st.success(f"Podcast '{podcast_id}' processed and added to Pinecone.")
+                break
+        else:
+            st.success("No new podcasts to be ingested")
     
 # Example usage:
-if __name__ == "__main__": ## TESTING ##
+if __name__ == "__main__": ## TESTING ##    
     # folder_id = "1ptf4zFnw0Lu5sJMMDIqwY2WxDVj29kz1"
     processor = DocumentProcessor(INDEX_NAME)
-    processor.process_and_add_documents_from_drive()
+    # processor.process_and_add_documents_from_drive()
+    # processor.process_and_add_documents_from_local()
+    processor.process_and_add_new_podcasts()
     # existing_ids = processor.check_existing_docs_by_id(files)
 
     # processor.process_and_add_documents_from_local()
