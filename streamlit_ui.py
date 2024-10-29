@@ -20,19 +20,27 @@ if 'sources' not in st.session_state:
 if 'submitted_input' not in st.session_state:
     st.session_state.submitted_input = ""
 
+if 'processor' not in st.session_state:
+    st.session_state.processor = None
+
+if index_name:
+    st.session_state.processor =  DocumentProcessor(index_name=index_name)
+    print("init processor for" ,index_name)
+
 with st.sidebar: ingest = st.button("Ingest/Check for new docs in your drive data folder")
 with st.sidebar: podcast = st.button("Ingest podcasts. Might take time.")
 if ingest:
     if folder_id and index_name:
-        processor = DocumentProcessor(index_name=index_name,drive_folder_id=folder_id)
-        processor.process_and_add_documents_from_drive()
+        st.session_state.processor.process_and_add_documents_from_drive(folder_id)
     else:
         with st.sidebar:
             st.error("Enter folder ID and index name")
 if podcast:
     if latest_n and index_name:
-        pp = DocumentProcessor(index_name=index_name)
-        pp.process_and_add_new_podcasts(latest_n)
+        st.session_state.processor.process_and_add_new_podcasts(latest_n)
+        with st.sidebar:
+            if st.button("Stop ingestion"):
+                st.stop()
     else:
         with st.sidebar:
             st.error("Enter latest number of podcasts and index name")

@@ -34,7 +34,7 @@ TEMP_DOWNLOAD_DIR = './temp_downloads'
 class DocumentProcessor:
     def __init__(self, directory_path="./data/",
                 index_name="test",
-                drive_folder_id ="1-50Qfs8g8DELeudumJNarNrS4WRA6-F6",
+                drive_folder_id=None,
                 rss_url = "https://feeds.simplecast.com/XFfCG1w8"):
         load_dotenv()
         self.rss_url = rss_url
@@ -42,17 +42,20 @@ class DocumentProcessor:
         self.dimensions = 1536
         self.directory = directory_path
         self.index_name = index_name
-        openai_api_key = os.getenv("OPENAI_API_KEY")
+        # openai_api_key = os.getenv("OPENAI_API_KEY")
+        openai_api_key = st.secrets['OPENAI_API_KEY']
+
         self.client = OpenAI(api_key=openai_api_key)
         self.embeddings = OpenAIEmbeddings(api_key=openai_api_key, model="text-embedding-3-small")
         self.vector_store = self.load_pinecone_vector_store()
         print("Document Processor initialized.")
 
     def load_pinecone_vector_store(self):
-        pinecone_api_key = os.getenv("PINECONE_API_KEY")
+        # pinecone_api_key = os.getenv("PINECONE_API_KEY")
+        pinecone_api_key = st.secrets['PINECONE_API_KEY']
         if not pinecone_api_key:
             raise ValueError("No Pinecone API key found in environment variables.")
-        
+        print("LOading {} index".format(self.index_name))
         pc = Pinecone(api_key=pinecone_api_key)
 
         if self.index_name not in pc.list_indexes().names():
@@ -131,7 +134,7 @@ class DocumentProcessor:
         3. name
         """
         files = []
-        folder_queue = [self.drive_folder_id]
+        folder_queue = [folder_id]
         while folder_queue:
             current_folder_id = folder_queue.pop(0)
             query = f"'{current_folder_id}' in parents"
@@ -144,9 +147,15 @@ class DocumentProcessor:
                     files.append(item)
         return files
 
-    def process_and_add_documents_from_drive(self):
+    def process_and_add_documents_from_drive(self, folder_id=None):
+        print(folder_id)
         service = self.authenticate_drive_with_service_account()
-        files = self.list_files_in_drive(service, self.drive_folder_id)
+        # folder_id = folder_id if folder_id else self.drive_folder_id
+        try:
+            files = self.list_files_in_drive(service, folder_id=folder_id)
+        except Exception as e:
+            st.error("Folder ID invalid or not given access")
+            return
 
         if not files:
             print("No documents found in the specified folder.")
@@ -346,6 +355,7 @@ class DocumentProcessor:
         Transcribes a single audio chunk using OpenAI Whisper API.
         """
         with open(chunk_path, "rb") as audio_file:
+            print("Converting to text ", chunk_path)
             transcription = self.client.audio.transcriptions.create(
                 file=audio_file,
                 model="whisper-1",
@@ -407,9 +417,9 @@ class DocumentProcessor:
         print(new_podcasts)
         if new_podcasts:
             st.success("New podcasts found.")
-            print("Processing podcasts texts")
             for podcast in new_podcasts:
                 podcast_id = podcast["title"]
+                st.info("Making transcription..for {}".format(podcast_id))
                 print(podcast_id)
                 transcript = self.process_podcast_audio(podcast["mp3_url"])
                 self.add_podcast_to_index(podcast_id, transcript)
